@@ -1,12 +1,54 @@
 import AesEncryption from "../helpers/aes.js";
 import BrantaPaymentException from "../classes/brantaPaymentException.js";
+import BrantaClientOptions from "../classes/brantaClientOptions.js";
+
+export interface Destination {
+  value: string;
+  zk?: boolean;
+}
+
+export interface Payment {
+  destinations: Destination[];
+  ttl?: number;
+  description?: string;
+  metadata?: Record<string, string>;
+}
+
+interface PaymentResponse extends Payment {
+  createdAt: Date;
+  platform: string;
+  platformLogoUrl: string;
+}
+
+interface PaymentResult {
+  payment: PaymentResponse;
+  verifyLink: string;
+}
+
+interface ZKPaymentResult extends PaymentResult {
+  secret: string;
+}
+
+interface HttpClient {
+  baseURL: string;
+  headers: Record<string, string>;
+  get(url: string, config?: RequestConfig): Promise<Response>;
+  post(url: string, data: unknown, config?: RequestConfig): Promise<Response>;
+}
+
+interface RequestConfig {
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}
 
 export class V2BrantaClient {
-  constructor(brantaClientOptions) {
+  private _defaultOptions: BrantaClientOptions;
+
+  constructor(brantaClientOptions: BrantaClientOptions) {
     this._defaultOptions = brantaClientOptions;
   }
 
-  async getPayments(address, options = null) {
+  async getPayments(address: string, options: BrantaClientOptions | null = null): Promise<Payment[]> {
     const httpClient = this._createClient(options);
     const response = await httpClient.get(`/v2/payments/${address}`);
 
@@ -14,16 +56,16 @@ export class V2BrantaClient {
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as Payment[];
     return data;
   }
 
-  async getZKPayment(address, secret, options = null) {
+  async getZKPayment(address: string, secret: string, options: BrantaClientOptions | null = null): Promise<Payment[]> {
     const payments = await this.getPayments(address, options);
 
     for (const payment of payments) {
-      for (const destination of payment.destinations) {
-        if (destination.isZk === false) continue;
+      for (const destination of payment?.destinations || []) {
+        if (destination.zk === false) continue;
         destination.value = await AesEncryption.decrypt(
           destination.value,
           secret,
@@ -34,7 +76,7 @@ export class V2BrantaClient {
     return payments;
   }
 
-  async addPayment(payment, options = null) {
+  async addPayment(payment: Payment, options: BrantaClientOptions | null = null): Promise<PaymentResult> {
     const httpClient = this._createClient(options);
     this._setApiKey(httpClient, options);
     await this._setHmacHeaders(
@@ -52,25 +94,33 @@ export class V2BrantaClient {
     }
 
     const responseBody = await response.text();
-    return JSON.parse(responseBody);
+    const paymentResponse = JSON.parse(responseBody) as PaymentResponse;
+
+    const verifyLink = httpClient.baseURL + "/v2/verify/" + encodeURIComponent(payment.destinations[0].value);
+
+    return { payment: paymentResponse, verifyLink };
   }
 
-  async addZKPayment(payment, options = null) {
+  async addZKPayment(payment: Payment, options: BrantaClientOptions | null = null): Promise<ZKPaymentResult> {
     const secret = crypto.randomUUID();
 
-    for (const destination of payment.destinations) {
-      if (destination.isZk === false) continue;
+    for (const destination of payment?.destinations || []) {
+      if (destination.zk === false) continue;
       destination.value = await AesEncryption.encrypt(
         destination.value,
         secret,
       );
     }
 
-    const responsePayment = await this.addPayment(payment, options);
-    return { payment: responsePayment, secret };
+    const responsePayment = (await this.addPayment(payment, options)) as ZKPaymentResult;
+
+    responsePayment.secret = secret;
+    responsePayment.verifyLink = responsePayment.verifyLink.replace('verify', 'zk-verify') + "#secret=" + secret;
+
+    return responsePayment;
   }
 
-  async isApiKeyValid(options = null) {
+  async isApiKeyValid(options: BrantaClientOptions | null = null): Promise<boolean> {
     const httpClient = this._createClient(options);
     this._setApiKey(httpClient, options);
 
@@ -84,19 +134,19 @@ export class V2BrantaClient {
     return response.ok;
   }
 
-  _createClient(options) {
+  private _createClient(options: BrantaClientOptions | null): HttpClient {
     const baseUrl = options?.baseUrl ?? this._defaultOptions?.baseUrl;
 
-    if (!baseUrl?.url) {
+    const fullBaseUrl = typeof baseUrl === 'string' ? baseUrl : baseUrl?.url;
+
+    if (!fullBaseUrl) {
       throw new Error("Branta: BaseUrl is a required option.");
     }
-
-    const fullBaseUrl = baseUrl.url;
 
     return {
       baseURL: fullBaseUrl,
       headers: {},
-      async get(url, config = {}) {
+      async get(url: string, config: RequestConfig = {}): Promise<Response> {
         const response = await fetch(`${this.baseURL}${url}`, {
           method: "GET",
           headers: { ...this.headers, ...config?.headers },
@@ -104,7 +154,7 @@ export class V2BrantaClient {
         });
         return response;
       },
-      async post(url, data, config = {}) {
+      async post(url: string, data: unknown, config: RequestConfig = {}): Promise<Response> {
         const response = await fetch(`${this.baseURL}${url}`, {
           method: "POST",
           headers: {
@@ -120,7 +170,7 @@ export class V2BrantaClient {
     };
   }
 
-  _setApiKey(httpClient, options) {
+  private _setApiKey(httpClient: HttpClient, options: BrantaClientOptions | null): void {
     const apiKey =
       options?.defaultApiKey ?? this._defaultOptions?.defaultApiKey;
 
@@ -134,7 +184,13 @@ export class V2BrantaClient {
     };
   }
 
-  async _setHmacHeaders(httpClient, method, url, body, options) {
+  private async _setHmacHeaders(
+    httpClient: HttpClient,
+    method: string,
+    url: string,
+    body: unknown,
+    options: BrantaClientOptions | null
+  ): Promise<void> {
     const hmacSecret = options?.hmacSecret ?? this._defaultOptions?.hmacSecret;
 
     if (!hmacSecret) {

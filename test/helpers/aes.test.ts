@@ -1,5 +1,5 @@
 import { describe, test, expect } from "@jest/globals";
-import AesEncryption from "./../../src/helpers/aes";
+import AesEncryption from "../../src/helpers/aes";
 
 describe("AesEncryption", () => {
   test("should encrypt and decrypt a bitcoin address", async () => {

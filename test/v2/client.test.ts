@@ -1,22 +1,34 @@
 import { describe, test, expect, jest, beforeEach } from "@jest/globals";
-import V2BrantaClient from "../../src/v2/client.js";
-import BrantaPaymentException from "../../src/classes/brantaPaymentException.js";
-import AesEncryption from "../../src/helpers/aes.js";
+import V2BrantaClient from "../../src/v2/client";
+import BrantaPaymentException from "../../src/classes/brantaPaymentException";
+import BrantaClientOptions from "../../src/classes/brantaClientOptions";
+import AesEncryption from "../../src/helpers/aes";
+
+interface MockResponse {
+  ok: boolean;
+  status?: number;
+  headers?: {
+    get: (key: string) => string;
+  };
+  json?: () => Promise<any>;
+  text?: () => Promise<string>;
+}
 
 describe("V2BrantaClient", () => {
-  let client;
-  let mockFetch;
-  const defaultOptions = {
+  let client: V2BrantaClient;
+  let mockFetch: jest.Mock<typeof fetch>;
+  const defaultOptions: BrantaClientOptions = {
     baseUrl: { url: "http://localhost:3000" },
     defaultApiKey: "test-api-key",
-  };
+    hmacSecret: null,
+  } as BrantaClientOptions;
 
   const testPayments = [
     {
       destinations: [
         {
           value: "123",
-          isZk: false,
+          zk: false,
         },
       ],
     },
@@ -24,7 +36,7 @@ describe("V2BrantaClient", () => {
       destinations: [
         {
           value: "456",
-          isZk: false,
+          zk: false,
         },
       ],
     },
@@ -32,8 +44,8 @@ describe("V2BrantaClient", () => {
 
   beforeEach(() => {
     client = new V2BrantaClient(defaultOptions);
-    mockFetch = jest.fn();
-    global.fetch = mockFetch;
+    mockFetch = jest.fn() as jest.Mock<typeof fetch>;
+    global.fetch = mockFetch as any;
     jest.clearAllMocks();
   });
 
@@ -46,7 +58,7 @@ describe("V2BrantaClient", () => {
           get: () => "100",
         },
         json: async () => testPayments,
-      });
+      } as MockResponse as Response);
 
       const result = await client.getPayments(address);
 
@@ -63,7 +75,7 @@ describe("V2BrantaClient", () => {
         headers: {
           get: () => "0",
         },
-      });
+      } as MockResponse as Response);
 
       const result = await client.getPayments(address);
 
@@ -78,7 +90,7 @@ describe("V2BrantaClient", () => {
         headers: {
           get: () => "0",
         },
-      });
+      } as MockResponse as Response);
 
       const result = await client.getPayments(address);
 
@@ -89,8 +101,8 @@ describe("V2BrantaClient", () => {
     test("should use custom options", async () => {
       const address = "test-address";
       const customOptions = {
-        baseUrl: { url: "https://production.example.com" },
-      };
+        baseUrl: "https://production.example.com",
+      } as BrantaClientOptions;
 
       mockFetch.mockResolvedValue({
         ok: true,
@@ -98,7 +110,7 @@ describe("V2BrantaClient", () => {
           get: () => "2",
         },
         json: async () => [],
-      });
+      } as MockResponse as Response);
 
       await client.getPayments(address, customOptions);
 
@@ -109,7 +121,7 @@ describe("V2BrantaClient", () => {
     });
 
     test("should throw exception if baseUrl not set", async () => {
-      client = new V2BrantaClient({});
+      client = new V2BrantaClient({} as BrantaClientOptions);
 
       await expect(client.getPayments("test-address")).rejects.toThrow(
         "Branta: BaseUrl is a required option.",
@@ -124,8 +136,8 @@ describe("V2BrantaClient", () => {
       const payments = [
         {
           destinations: [
-            { isZk: true, value: encryptedValue },
-            { isZk: false, value: "plain-value" },
+            { zk: true, value: encryptedValue },
+            { zk: false, value: "plain-value" },
           ],
         },
       ];
@@ -136,7 +148,7 @@ describe("V2BrantaClient", () => {
           get: () => "100",
         },
         json: async () => JSON.parse(JSON.stringify(payments)),
-      });
+      } as MockResponse as Response);
 
       const result = await client.getZKPayment(encryptedValue, "1234");
 
@@ -150,7 +162,7 @@ describe("V2BrantaClient", () => {
     test("should return unmodified payments with no ZK destinations", async () => {
       const payments = [
         {
-          destinations: [{ isZk: false, value: "plain-value" }],
+          destinations: [{ zk: false, value: "plain-value" }],
         },
       ];
 
@@ -160,7 +172,7 @@ describe("V2BrantaClient", () => {
           get: () => "100",
         },
         json: async () => JSON.parse(JSON.stringify(payments)),
-      });
+      } as MockResponse as Response);
 
       const result = await client.getZKPayment("plain-value", "test-secret");
 
@@ -174,9 +186,10 @@ describe("V2BrantaClient", () => {
     test("should throw exception when no API key is provided", async () => {
       const payment = testPayments[0];
       const clientWithoutApiKey = new V2BrantaClient({
-        baseUrl: { url: "https://production.example.com" },
+        baseUrl: "https://production.example.com",
         defaultApiKey: null,
-      });
+        hmacSecret: null,
+      } as BrantaClientOptions);
 
       await expect(clientWithoutApiKey.addPayment(payment)).rejects.toThrow(
         BrantaPaymentException,
@@ -186,14 +199,14 @@ describe("V2BrantaClient", () => {
     test("should use custom API key", async () => {
       const payment = testPayments[0];
       const customOptions = {
-        baseUrl: { url: "https://production.example.com" },
+        baseUrl: "https://production.example.com",
         defaultApiKey: "custom-api-key",
-      };
+      } as BrantaClientOptions;
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(testPayments[0]),
-      });
+      } as MockResponse as Response);
 
       await client.addPayment(payment, customOptions);
 
@@ -213,7 +226,7 @@ describe("V2BrantaClient", () => {
       mockFetch.mockResolvedValue({
         ok: false,
         status: 400,
-      });
+      } as MockResponse as Response);
 
       await expect(client.addPayment(payment)).rejects.toThrow(
         BrantaPaymentException,
@@ -222,14 +235,15 @@ describe("V2BrantaClient", () => {
 
     test("should return parsed response on success", async () => {
       const payment = testPayments[0];
-      const expectedResponse = { ...payment, id: "12345" };
 
       mockFetch.mockResolvedValue({
         ok: true,
-        text: async () => JSON.stringify(expectedResponse),
-      });
+        text: async () => JSON.stringify({ ...payment }),
+      } as MockResponse as Response);
 
       const result = await client.addPayment(payment);
+
+      const expectedResponse = { payment, verifyLink: 'http://localhost:3000/v2/verify/123' }
 
       expect(result).toEqual(expectedResponse);
     });
@@ -240,21 +254,21 @@ describe("V2BrantaClient", () => {
       const plainText = "plain-value";
       const payment = {
         destinations: [
-          { isZk: true, value: plainText },
-          { isZk: false, value: "other-value" },
+          { zk: true, value: plainText },
+          { zk: false, value: "other-value" },
         ],
       };
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       const result = await client.addZKPayment(payment);
 
       const zkPayment = result.payment.destinations.find(
-        (d) => d.isZk == true,
-      ).value;
+        (d) => d.zk == true,
+      )!.value;
 
       expect(await AesEncryption.decrypt(zkPayment, result.secret)).toBe(
         plainText,
@@ -268,7 +282,7 @@ describe("V2BrantaClient", () => {
     test("should return true for valid API key", async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-      });
+      } as MockResponse as Response);
 
       const result = await client.isApiKeyValid();
 
@@ -278,7 +292,7 @@ describe("V2BrantaClient", () => {
     test("should return false for invalid API key", async () => {
       mockFetch.mockResolvedValue({
         ok: false,
-      });
+      } as MockResponse as Response);
 
       const result = await client.isApiKeyValid();
 
@@ -287,13 +301,13 @@ describe("V2BrantaClient", () => {
 
     test("should use custom options", async () => {
       const customOptions = {
-        baseUrl: { url: "https://production.example.com" },
+        baseUrl: "https://production.example.com",
         defaultApiKey: "custom-key",
-      };
+      } as BrantaClientOptions;
 
       mockFetch.mockResolvedValue({
         ok: true,
-      });
+      } as MockResponse as Response);
 
       await client.isApiKeyValid(customOptions);
 
@@ -314,12 +328,12 @@ describe("V2BrantaClient", () => {
       const optionsWithHmac = {
         ...defaultOptions,
         hmacSecret: "test-secret-key",
-      };
+      } as BrantaClientOptions;
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       await client.addPayment(payment, optionsWithHmac);
 
@@ -341,14 +355,15 @@ describe("V2BrantaClient", () => {
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       await client.addPayment(payment);
 
-      const callArgs = mockFetch.mock.calls[0][1];
-      expect(callArgs.headers["X-HMAC-Signature"]).toBeUndefined();
-      expect(callArgs.headers["X-HMAC-Timestamp"]).toBeUndefined();
-      expect(callArgs.headers.Authorization).toBe("Bearer test-api-key");
+      const callArgs = mockFetch.mock.calls[0][1] as RequestInit;
+      const headers = callArgs.headers as Record<string, string>;
+      expect(headers["X-HMAC-Signature"]).toBeUndefined();
+      expect(headers["X-HMAC-Timestamp"]).toBeUndefined();
+      expect(headers.Authorization).toBe("Bearer test-api-key");
     });
 
     test("should generate correct HMAC signature format", async () => {
@@ -356,18 +371,19 @@ describe("V2BrantaClient", () => {
       const optionsWithHmac = {
         ...defaultOptions,
         hmacSecret: "test-secret-key",
-      };
+      } as BrantaClientOptions;
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       await client.addPayment(payment, optionsWithHmac);
 
-      const callArgs = mockFetch.mock.calls[0][1];
-      const signature = callArgs.headers["X-HMAC-Signature"];
-      const timestamp = callArgs.headers["X-HMAC-Timestamp"];
+      const callArgs = mockFetch.mock.calls[0][1] as RequestInit;
+      const headers = callArgs.headers as Record<string, string>;
+      const signature = headers["X-HMAC-Signature"];
+      const timestamp = headers["X-HMAC-Timestamp"];
 
       expect(signature).toMatch(/^[a-f0-9]{64}$/);
 
@@ -383,12 +399,12 @@ describe("V2BrantaClient", () => {
       const clientWithHmac = new V2BrantaClient({
         ...defaultOptions,
         hmacSecret: "default-hmac-secret",
-      });
+      } as BrantaClientOptions);
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       await clientWithHmac.addPayment(payment);
 
@@ -408,29 +424,29 @@ describe("V2BrantaClient", () => {
       const clientWithHmac = new V2BrantaClient({
         ...defaultOptions,
         hmacSecret: "default-hmac-secret",
-      });
+      } as BrantaClientOptions);
 
       const customOptions = {
         hmacSecret: "custom-hmac-secret",
-      };
+      } as BrantaClientOptions;
 
-      let capturedSignature1, capturedSignature2;
+      let capturedSignature1: string, capturedSignature2: string;
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
       await clientWithHmac.addPayment(payment);
-      capturedSignature1 =
-        mockFetch.mock.calls[0][1].headers["X-HMAC-Signature"];
+      const headers1 = (mockFetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+      capturedSignature1 = headers1["X-HMAC-Signature"];
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
       await clientWithHmac.addPayment(payment, customOptions);
-      capturedSignature2 =
-        mockFetch.mock.calls[1][1].headers["X-HMAC-Signature"];
+      const headers2 = (mockFetch.mock.calls[1][1] as RequestInit).headers as Record<string, string>;
+      capturedSignature2 = headers2["X-HMAC-Signature"];
 
       expect(capturedSignature1).not.toBe(capturedSignature2);
     });
@@ -440,30 +456,30 @@ describe("V2BrantaClient", () => {
       const optionsWithHmac = {
         ...defaultOptions,
         hmacSecret: "consistent-secret",
-      };
+      } as BrantaClientOptions;
 
       const mockTimestamp = "1771444088";
       const originalDateNow = Date.now;
-      Date.now = jest.fn(() => parseInt(mockTimestamp) * 1000);
+      Date.now = jest.fn(() => parseInt(mockTimestamp) * 1000) as any;
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       await client.addPayment(payment, optionsWithHmac);
-      const firstCallSignature =
-        mockFetch.mock.calls[0][1].headers["X-HMAC-Signature"];
+      const firstCallHeaders = (mockFetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+      const firstCallSignature = firstCallHeaders["X-HMAC-Signature"];
 
       mockFetch.mockClear();
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       await client.addPayment(payment, optionsWithHmac);
-      const secondCallSignature =
-        mockFetch.mock.calls[0][1].headers["X-HMAC-Signature"];
+      const secondCallHeaders = (mockFetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+      const secondCallSignature = secondCallHeaders["X-HMAC-Signature"];
 
       expect(firstCallSignature).toBe(secondCallSignature);
 
@@ -474,18 +490,18 @@ describe("V2BrantaClient", () => {
   describe("addZKPayment with HMAC", () => {
     test("should include HMAC headers when hmacSecret is provided", async () => {
       const payment = {
-        destinations: [{ isZk: true, value: "plain-value" }],
+        destinations: [{ zk: true, value: "plain-value" }],
       };
 
       const optionsWithHmac = {
         ...defaultOptions,
         hmacSecret: "test-secret-key",
-      };
+      } as BrantaClientOptions;
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       await client.addZKPayment(payment, optionsWithHmac);
 
@@ -503,22 +519,23 @@ describe("V2BrantaClient", () => {
 
     test("should work without HMAC headers", async () => {
       const payment = {
-        destinations: [{ isZk: true, value: "plain-value" }],
+        destinations: [{ zk: true, value: "plain-value" }],
       };
 
       mockFetch.mockResolvedValue({
         ok: true,
         text: async () => JSON.stringify(payment),
-      });
+      } as MockResponse as Response);
 
       const result = await client.addZKPayment(payment);
 
       expect(result.payment).toBeDefined();
       expect(result.secret).toBeDefined();
 
-      const callArgs = mockFetch.mock.calls[0][1];
-      expect(callArgs.headers["X-HMAC-Signature"]).toBeUndefined();
-      expect(callArgs.headers["X-HMAC-Timestamp"]).toBeUndefined();
+      const callArgs = mockFetch.mock.calls[0][1] as RequestInit;
+      const headers = callArgs.headers as Record<string, string>;
+      expect(headers["X-HMAC-Signature"]).toBeUndefined();
+      expect(headers["X-HMAC-Timestamp"]).toBeUndefined();
     });
   });
 });
