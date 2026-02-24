@@ -1,4 +1,4 @@
-import { ServerEnvironment } from "./brantaServerBaseUrl";
+import { ServerEnvironment } from "./brantaServerBaseUrl.js";
 
 export default interface BrantaClientOptions {
   baseUrl?: ServerEnvironment | string | null;
