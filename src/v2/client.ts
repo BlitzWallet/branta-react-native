@@ -32,6 +32,7 @@ interface ZKPaymentResult extends PaymentResult {
 interface HttpClient {
   baseURL: string;
   headers: Record<string, string>;
+  timeout: number;
   get(url: string, config?: RequestConfig): Promise<Response>;
   post(url: string, data: unknown, config?: RequestConfig): Promise<Response>;
 }
@@ -124,18 +125,14 @@ export class V2BrantaClient {
     const httpClient = this._createClient(options);
     this._setApiKey(httpClient, options);
 
-    const response = await fetch(
-      `${httpClient.baseURL}/v2/api-keys/health-check`,
-      {
-        headers: httpClient.headers,
-      },
-    );
+    const response = await httpClient.get("/v2/api-keys/health-check");
 
     return response.ok;
   }
 
   private _createClient(options: BrantaClientOptions | null): HttpClient {
     const baseUrl = options?.baseUrl ?? this._defaultOptions?.baseUrl;
+    const timeout = options?.timeout ?? this._defaultOptions?.timeout ?? 10000;
 
     const fullBaseUrl = typeof baseUrl === 'string' ? baseUrl : baseUrl?.url;
 
@@ -146,26 +143,51 @@ export class V2BrantaClient {
     return {
       baseURL: fullBaseUrl,
       headers: {},
+      timeout,
       async get(url: string, config: RequestConfig = {}): Promise<Response> {
-        const response = await fetch(`${this.baseURL}${url}`, {
-          method: "GET",
-          headers: { ...this.headers, ...config?.headers },
-          signal: config?.signal,
-        });
-        return response;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+        try {
+          const response = await fetch(`${this.baseURL}${url}`, {
+            method: "GET",
+            headers: { ...this.headers, ...config?.headers },
+            signal: config?.signal ?? controller.signal,
+          });
+          return response;
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw new BrantaPaymentException('Request timeout');
+          }
+          throw error;
+        } finally {
+          clearTimeout(timeoutId);
+        }
       },
       async post(url: string, data: unknown, config: RequestConfig = {}): Promise<Response> {
-        const response = await fetch(`${this.baseURL}${url}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...this.headers,
-            ...config?.headers,
-          },
-          body: JSON.stringify(data),
-          signal: config?.signal,
-        });
-        return response;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+        try {
+          const response = await fetch(`${this.baseURL}${url}`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...this.headers,
+              ...config?.headers,
+            },
+            body: JSON.stringify(data),
+            signal: config?.signal ?? controller.signal,
+          });
+          return response;
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw new BrantaPaymentException('Request timeout');
+          }
+          throw error;
+        } finally {
+          clearTimeout(timeoutId);
+        }
       },
     };
   }
