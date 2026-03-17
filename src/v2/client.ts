@@ -146,6 +146,10 @@ export class V2BrantaClient {
         return this.getZKPayment(brantaId, brantaSecret, options);
       }
 
+      if (url.protocol === 'bitcoin:') {
+        return this.getPayments(this._normalizeAddress(url.pathname), options);
+      }
+
       if (url.protocol === 'http:' || url.protocol === 'https:') {
         const baseUrl = this._resolveBaseUrl(options);
         if (baseUrl && new URL(baseUrl).origin === url.origin) {
