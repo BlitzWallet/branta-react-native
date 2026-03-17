@@ -12,6 +12,7 @@ export interface Payment {
   ttl?: number;
   description?: string;
   metadata?: Record<string, string>;
+  verify_url?: string;
 }
 
 interface PaymentResponse extends Payment {
@@ -58,6 +59,10 @@ export class V2BrantaClient {
     }
 
     const data = await response.json() as Payment[];
+    const baseUrl = this._resolveBaseUrl(options);
+    for (const payment of data) {
+      payment.verify_url = this._buildVerifyUrl(baseUrl, address);
+    }
     return data;
   }
 
@@ -72,6 +77,11 @@ export class V2BrantaClient {
           secret,
         );
       }
+    }
+
+    const baseUrl = this._resolveBaseUrl(options);
+    for (const payment of payments) {
+      payment.verify_url = this._buildVerifyUrl(baseUrl, address, secret);
     }
 
     return payments;
@@ -97,6 +107,7 @@ export class V2BrantaClient {
     const responseBody = await response.text();
     const paymentResponse = JSON.parse(responseBody) as PaymentResponse;
 
+    paymentResponse.verify_url = this._buildVerifyUrl(httpClient.baseURL, payment.destinations[0].value);
     const verifyLink = httpClient.baseURL + "/v2/verify/" + encodeURIComponent(payment.destinations[0].value);
 
     return { payment: paymentResponse, verifyLink };
@@ -117,6 +128,7 @@ export class V2BrantaClient {
 
     responsePayment.secret = secret;
     responsePayment.verifyLink = responsePayment.verifyLink.replace('verify', 'zk-verify') + "#secret=" + secret;
+    responsePayment.payment.verify_url = this._buildVerifyUrl(this._resolveBaseUrl(options), payment.destinations[0].value, secret);
 
     return responsePayment;
   }
@@ -164,6 +176,14 @@ export class V2BrantaClient {
     const response = await httpClient.get("/v2/api-keys/health-check");
 
     return response.ok;
+  }
+
+  private _buildVerifyUrl(baseUrl: string, address: string, secret?: string): string {
+    const encoded = encodeURIComponent(address);
+    if (secret) {
+      return `${baseUrl}/v2/zk-verify/${encoded}#secret=${secret}`;
+    }
+    return `${baseUrl}/v2/verify/${encoded}`;
   }
 
   private _resolveBaseUrl(options: BrantaClientOptions | null): string {
