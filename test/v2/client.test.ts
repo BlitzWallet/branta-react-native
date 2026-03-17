@@ -604,6 +604,16 @@ describe("V2BrantaClient", () => {
       await client.getPaymentsByQRCode("  some-payment-id  ");
       expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null);
     });
+
+    test("should strip BIP21 query params and normalize bitcoin: URI", async () => {
+      await client.getPaymentsByQRCode(
+        "bitcoin:BC1QTESTADDRESS?amount=0.00002701&pj=https://example.com/pj"
+      );
+      expect(getPaymentsSpy).toHaveBeenCalledWith(
+        "bc1qtestaddress",
+        null
+      );
+    });
   });
 
   describe("addZKPayment with HMAC", () => {
