@@ -572,6 +572,15 @@ describe("V2BrantaClient", () => {
       expect(getZKPaymentSpy).toHaveBeenCalledWith("myid", "mysecret", null);
     });
 
+    test("should preserve + in branta_id from bitcoin: URI query params", async () => {
+      const brantaId = "8RII4RAd8LDsbbBtZY4d+58TI7i7oWb1J43A6JOoZLBMKhUc6Fc5aEjzgUH5r4jouWoRR9ji9zUkswcFhnCrI9petshDfw==";
+      const brantaSecret = "ec71c3d2-8704-4879-aec6-d09e4d5073ab";
+      await client.getPaymentsByQRCode(
+        `bitcoin:BC1Q22WQZZ5PG2ZQVZECR6ZG6QSSUDA07XEXJU4WWQ?amount=0.00002679&pj=https://pay.branta.pro/BTC/pj&branta_id=${brantaId}&branta_secret=${brantaSecret}`
+      );
+      expect(getZKPaymentSpy).toHaveBeenCalledWith(brantaId, brantaSecret, null);
+    });
+
     test("should dispatch /v2/verify/{id} URL to getPayments", async () => {
       await client.getPaymentsByQRCode("http://localhost:3000/v2/verify/abc123");
       expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", null);
@@ -622,6 +631,20 @@ describe("V2BrantaClient", () => {
       expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null);
     });
 
+    test("should decode percent-encoded branta_id from URL search params and pass to getZKPayment", async () => {
+      const plaintext = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+      const secret = "mySecret123";
+
+      const encrypted = await AesEncryption.encrypt(plaintext, secret);
+      const encodedId = encodeURIComponent(encrypted);
+
+      await client.getPaymentsByQRCode(
+        `http://example.com?branta_id=${encodedId}&branta_secret=${secret}`
+      );
+
+      expect(getZKPaymentSpy).toHaveBeenCalledWith(encrypted, secret, null);
+    });
+
     test("should strip BIP21 query params and normalize bitcoin: URI", async () => {
       await client.getPaymentsByQRCode(
         "bitcoin:BC1QTESTADDRESS?amount=0.00002701&pj=https://example.com/pj"
@@ -633,12 +656,16 @@ describe("V2BrantaClient", () => {
     });
 
     test("should decode percent-encoded ZK key from payments/k/ URL and pass to getPayments", async () => {
-      const zkKey = "DtLpv1Zgf8QAcOAkmt8N3QAsxtHOlqeIBt1OQPb95TVatwznXcjFOq9rrtdaOLGgKT17siGjlToMwkAtawjp5zngIg g==";
-      const encodedKey = encodeURIComponent(zkKey);
+      const plaintext = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+      const secret = "mySecret123";
+
+      const encrypted = await AesEncryption.encrypt(plaintext, secret);
+
+      const encodedKey = encodeURIComponent(encrypted);
       await client.getPaymentsByQRCode(
-        `http://localhost:3000/v2/payments/k/${encodedKey}`
+        `http://localhost:3000/v2/payments/${encodedKey}`
       );
-      expect(getPaymentsSpy).toHaveBeenCalledWith(zkKey, null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith(encrypted, null);
     });
   });
 

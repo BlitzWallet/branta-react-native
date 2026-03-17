@@ -140,8 +140,9 @@ export class V2BrantaClient {
     try { url = new URL(text); } catch { /* not a URL */ }
 
     if (url) {
-      const brantaId = url.searchParams.get('branta_id');
-      const brantaSecret = url.searchParams.get('branta_secret');
+      const rawParams = new URLSearchParams(url.search.replace(/\+/g, '%2B'));
+      const brantaId = rawParams.get('branta_id');
+      const brantaSecret = rawParams.get('branta_secret');
       if (brantaId && brantaSecret) {
         return this.getZKPayment(brantaId, brantaSecret, options);
       }
