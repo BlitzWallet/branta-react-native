@@ -56,9 +56,9 @@ export class V2BrantaClient {
   }
 
   async getPayments(address: string, options: BrantaClientOptions | null = null): Promise<Payment[]> {
-    const zkOnly = options?.zkOnly ?? this._defaultOptions?.zkOnly ?? false;
-    if (zkOnly) {
-      throw new BrantaPaymentException("zkOnly is enabled: plain address lookups are not permitted");
+    const privacy = options?.privacy ?? this._defaultOptions?.privacy;
+    if (privacy === 'strict') {
+      throw new BrantaPaymentException("privacy is set to 'strict': plain on-chain address lookups are not permitted");
     }
     return this._fetchPayments(address, options);
   }
@@ -218,8 +218,8 @@ export class V2BrantaClient {
   }
 
   private _getPlainPayments(address: string, options: BrantaClientOptions | null): Promise<Payment[]> {
-    const zkOnly = options?.zkOnly ?? this._defaultOptions?.zkOnly ?? false;
-    if (zkOnly) return Promise.resolve([]);
+    const privacy = options?.privacy ?? this._defaultOptions?.privacy;
+    if (privacy === 'strict') return Promise.resolve([]);
     return this.getPayments(address, options);
   }
 

@@ -21,6 +21,7 @@ describe("V2BrantaClient", () => {
     baseUrl: { url: "http://localhost:3000" },
     defaultApiKey: "test-api-key",
     hmacSecret: null,
+    privacy: 'loose',
   } as BrantaClientOptions;
 
   const testPayments: { destinations: Destination[] }[] = [
@@ -745,8 +746,8 @@ describe("V2BrantaClient", () => {
       expect(getPaymentsSpy).toHaveBeenCalledWith(encrypted, null);
     });
 
-    describe("zkOnly mode", () => {
-      const zkOptions = { ...defaultOptions, zkOnly: true } as BrantaClientOptions;
+    describe("strict privacy mode", () => {
+      const zkOptions = { ...defaultOptions, privacy: 'strict' } as BrantaClientOptions;
 
       test("should allow ZK query param QR (branta_id + branta_secret)", async () => {
         await client.getPaymentsByQRCode(
@@ -804,20 +805,20 @@ describe("V2BrantaClient", () => {
     });
   });
 
-  describe("getPayments with zkOnly", () => {
-    test("should throw BrantaPaymentException when zkOnly is enabled via options", async () => {
-      const zkOptions = { ...defaultOptions, zkOnly: true } as BrantaClientOptions;
+  describe("getPayments with strict privacy", () => {
+    test("should throw BrantaPaymentException when privacy is 'strict' via options", async () => {
+      const zkOptions = { ...defaultOptions, privacy: 'strict' } as BrantaClientOptions;
       await expect(client.getPayments("some-address", zkOptions)).rejects.toThrow(
         BrantaPaymentException
       );
     });
 
-    test("should throw BrantaPaymentException when zkOnly is enabled via defaultOptions", async () => {
-      const zkClient = new V2BrantaClient({ ...defaultOptions, zkOnly: true });
+    test("should throw BrantaPaymentException when privacy is 'strict' via defaultOptions", async () => {
+      const zkClient = new V2BrantaClient({ ...defaultOptions, privacy: 'strict' });
       await expect(zkClient.getPayments("some-address")).rejects.toThrow(BrantaPaymentException);
     });
 
-    test("should not throw when zkOnly is false (default)", async () => {
+    test("should not throw when privacy is 'loose'", async () => {
       mockFetch.mockResolvedValue({
         ok: false,
       } as MockResponse as Response);
