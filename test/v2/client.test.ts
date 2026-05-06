@@ -1,8 +1,8 @@
 import { describe, test, expect, jest, beforeEach } from "@jest/globals";
-import V2BrantaClient, { Destination } from "../../src/v2/client";
+import { BrantaClient } from "../../src/v2/client";
+import { Destination } from "../../src/v2/types";
 import BrantaPaymentException from "../../src/classes/brantaPaymentException";
 import BrantaClientOptions from "../../src/classes/brantaClientOptions";
-import AesEncryption from "../../src/helpers/aes";
 
 interface MockResponse {
   ok: boolean;
@@ -14,8 +14,8 @@ interface MockResponse {
   text?: () => Promise<string>;
 }
 
-describe("V2BrantaClient", () => {
-  let client: V2BrantaClient;
+describe("BrantaClient", () => {
+  let client: BrantaClient;
   let mockFetch: jest.Mock<typeof fetch>;
   const defaultOptions: BrantaClientOptions = {
     baseUrl: { url: "http://localhost:3000" },
@@ -46,7 +46,7 @@ describe("V2BrantaClient", () => {
   ];
 
   beforeEach(() => {
-    client = new V2BrantaClient(defaultOptions);
+    client = new BrantaClient(defaultOptions);
     mockFetch = jest.fn() as jest.Mock<typeof fetch>;
     global.fetch = mockFetch as any;
     jest.clearAllMocks();
@@ -198,110 +198,24 @@ describe("V2BrantaClient", () => {
     });
 
     test("should throw exception if baseUrl not set", async () => {
-      client = new V2BrantaClient({} as BrantaClientOptions);
+      client = new BrantaClient({} as BrantaClientOptions);
 
       await expect(client.getPayments("test-address")).rejects.toThrow(
         "Branta: BaseUrl is a required option.",
       );
     });
-
-    test("should set verifyUrl on returned payments", async () => {
-      const address = "test-address";
-      mockFetch.mockResolvedValue({
-        ok: true,
-        headers: { get: () => "100" },
-        json: async () => testPayments,
-      } as MockResponse as Response);
-
-      const result = await client.getPayments(address);
-
-      expect(result[0].verifyUrl).toBe("http://localhost:3000/v2/verify/test-address");
-      expect(result[1].verifyUrl).toBe("http://localhost:3000/v2/verify/test-address");
-    });
   });
 
-  describe("getZKPayment", () => {
-    test("should decrypt ZK destination values", async () => {
-      const encryptedValue =
-        "pQerSFV+fievHP+guYoGJjx1CzFFrYWHAgWrLhn5473Z19M6+WMScLd1hsk808AEF/x+GpZKmNacFBf5BbQ=";
-      const payments = [
-        {
-          destinations: [
-            { zk: true, value: encryptedValue },
-            { zk: false, value: "plain-value" },
-          ],
-        },
-      ];
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        headers: {
-          get: () => "100",
-        },
-        json: async () => JSON.parse(JSON.stringify(payments)),
-      } as MockResponse as Response);
-
-      const result = await client.getZKPayment(encryptedValue, "1234");
-
-      expect(result).not.toBeNull();
-      expect(result).toHaveLength(1);
-      expect(result[0].destinations[0].value).toBe(
-        "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
-      );
-    });
-
-    test("should return unmodified payments with no ZK destinations", async () => {
-      const payments = [
-        {
-          destinations: [{ zk: false, value: "plain-value" }],
-        },
-      ];
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        headers: {
-          get: () => "100",
-        },
-        json: async () => JSON.parse(JSON.stringify(payments)),
-      } as MockResponse as Response);
-
-      const result = await client.getZKPayment("plain-value", "test-secret");
-
-      expect(result).not.toBeNull();
-      expect(result).toHaveLength(1);
-      expect(result[0].destinations[0].value).toBe("plain-value");
-    });
-
-    test("should set ZK verifyUrl on returned payments", async () => {
-      const encryptedAddress = "pQerSFV+fievHP+guYoGJjx1CzFFrYWHAgWrLhn5473Z19M6+WMScLd1hsk808AEF/x+GpZKmNacFBf5BbQ=";
-      const payments = [
-        { destinations: [{ zk: true, value: encryptedAddress }] },
-      ];
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        headers: { get: () => "100" },
-        json: async () => JSON.parse(JSON.stringify(payments)),
-      } as MockResponse as Response);
-
-      const result = await client.getZKPayment(encryptedAddress, "1234");
-
-      expect(result[0].verifyUrl).toBe(
-        `http://localhost:3000/v2/zk-verify/${encodeURIComponent(encryptedAddress)}#secret=1234`,
-      );
-    });
-  });
-
-  describe("addPayment", () => {
+  describe("postPayment", () => {
     test("should throw exception when no API key is provided", async () => {
       const payment = testPayments[0];
-      const clientWithoutApiKey = new V2BrantaClient({
+      const clientWithoutApiKey = new BrantaClient({
         baseUrl: "https://production.example.com",
         defaultApiKey: null,
         hmacSecret: null,
       } as BrantaClientOptions);
 
-      await expect(clientWithoutApiKey.addPayment(payment)).rejects.toThrow(
+      await expect(clientWithoutApiKey.postPayment(payment)).rejects.toThrow(
         BrantaPaymentException,
       );
     });
@@ -318,7 +232,7 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(testPayments[0]),
       } as MockResponse as Response);
 
-      await client.addPayment(payment, customOptions);
+      await client.postPayment(payment, customOptions);
 
       expect(mockFetch).toHaveBeenCalledWith(
         "https://production.example.com/v2/payments",
@@ -338,7 +252,7 @@ describe("V2BrantaClient", () => {
         status: 400,
       } as MockResponse as Response);
 
-      await expect(client.addPayment(payment)).rejects.toThrow(
+      await expect(client.postPayment(payment)).rejects.toThrow(
         BrantaPaymentException,
       );
     });
@@ -351,14 +265,9 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify({ ...payment }),
       } as MockResponse as Response);
 
-      const result = await client.addPayment(payment);
+      const result = await client.postPayment(payment);
 
-      const expectedResponse = {
-        payment: { ...payment, verifyUrl: 'http://localhost:3000/v2/verify/123' },
-        verifyLink: 'http://localhost:3000/v2/verify/123',
-      };
-
-      expect(result).toEqual(expectedResponse);
+      expect(result).toEqual({ ...payment });
     });
 
     test("should include destination type in POST payload", async () => {
@@ -371,59 +280,12 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
 
-      await client.addPayment(payment);
+      await client.postPayment(payment);
 
       const callBody = JSON.parse(
         (mockFetch.mock.calls[0][1] as RequestInit).body as string,
       );
       expect(callBody.destinations[0].type).toBe("bitcoin_address");
-    });
-  });
-
-  describe("addZKPayment", () => {
-    test("should encrypt ZK destinations and return payment with secret", async () => {
-      const plainText = "plain-value";
-      const payment = {
-        destinations: [
-          { zk: true, value: plainText },
-          { zk: false, value: "other-value" },
-        ],
-      };
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        text: async () => JSON.stringify(payment),
-      } as MockResponse as Response);
-
-      const result = await client.addZKPayment(payment);
-
-      const zkPayment = result.payment.destinations.find(
-        (d) => d.zk == true,
-      )!.value;
-
-      expect(await AesEncryption.decrypt(zkPayment, result.secret)).toBe(
-        plainText,
-      );
-
-      expect(result.payment).toBeDefined();
-    });
-
-    test("should set ZK verifyUrl on returned payment", async () => {
-      const payment = {
-        destinations: [{ zk: true, value: "plain-value" }],
-      };
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        text: async () => JSON.stringify(payment),
-      } as MockResponse as Response);
-
-      const result = await client.addZKPayment(payment);
-
-      expect(result.payment.verifyUrl).toMatch(
-        /^http:\/\/localhost:3000\/v2\/zk-verify\/.+#secret=.+$/,
-      );
-      expect(result.payment.verifyUrl).toContain(`#secret=${result.secret}`);
     });
   });
 
@@ -471,7 +333,7 @@ describe("V2BrantaClient", () => {
     });
   });
 
-  describe("addPayment with HMAC", () => {
+  describe("postPayment with HMAC", () => {
     test("should include HMAC headers when hmacSecret is provided", async () => {
       const payment = testPayments[0];
       const optionsWithHmac = {
@@ -484,7 +346,7 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
 
-      await client.addPayment(payment, optionsWithHmac);
+      await client.postPayment(payment, optionsWithHmac);
 
       expect(mockFetch).toHaveBeenCalledWith(
         "http://localhost:3000/v2/payments",
@@ -506,7 +368,7 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
 
-      await client.addPayment(payment);
+      await client.postPayment(payment);
 
       const callArgs = mockFetch.mock.calls[0][1] as RequestInit;
       const headers = callArgs.headers as Record<string, string>;
@@ -527,7 +389,7 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
 
-      await client.addPayment(payment, optionsWithHmac);
+      await client.postPayment(payment, optionsWithHmac);
 
       const callArgs = mockFetch.mock.calls[0][1] as RequestInit;
       const headers = callArgs.headers as Record<string, string>;
@@ -535,7 +397,6 @@ describe("V2BrantaClient", () => {
       const timestamp = headers["X-HMAC-Timestamp"];
 
       expect(signature).toMatch(/^[a-f0-9]{64}$/);
-
       expect(timestamp).toMatch(/^\d{10}$/);
 
       const now = Math.floor(Date.now() / 1000);
@@ -545,7 +406,7 @@ describe("V2BrantaClient", () => {
 
     test("should use hmacSecret from default options", async () => {
       const payment = testPayments[0];
-      const clientWithHmac = new V2BrantaClient({
+      const clientWithHmac = new BrantaClient({
         ...defaultOptions,
         hmacSecret: "default-hmac-secret",
       } as BrantaClientOptions);
@@ -555,7 +416,7 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
 
-      await clientWithHmac.addPayment(payment);
+      await clientWithHmac.postPayment(payment);
 
       expect(mockFetch).toHaveBeenCalledWith(
         "http://localhost:3000/v2/payments",
@@ -570,7 +431,7 @@ describe("V2BrantaClient", () => {
 
     test("should override default hmacSecret with custom options", async () => {
       const payment = testPayments[0];
-      const clientWithHmac = new V2BrantaClient({
+      const clientWithHmac = new BrantaClient({
         ...defaultOptions,
         hmacSecret: "default-hmac-secret",
       } as BrantaClientOptions);
@@ -585,7 +446,7 @@ describe("V2BrantaClient", () => {
         ok: true,
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
-      await clientWithHmac.addPayment(payment);
+      await clientWithHmac.postPayment(payment);
       const headers1 = (mockFetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
       capturedSignature1 = headers1["X-HMAC-Signature"];
 
@@ -593,7 +454,7 @@ describe("V2BrantaClient", () => {
         ok: true,
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
-      await clientWithHmac.addPayment(payment, customOptions);
+      await clientWithHmac.postPayment(payment, customOptions);
       const headers2 = (mockFetch.mock.calls[1][1] as RequestInit).headers as Record<string, string>;
       capturedSignature2 = headers2["X-HMAC-Signature"];
 
@@ -616,7 +477,7 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
 
-      await client.addPayment(payment, optionsWithHmac);
+      await client.postPayment(payment, optionsWithHmac);
       const firstCallHeaders = (mockFetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
       const firstCallSignature = firstCallHeaders["X-HMAC-Signature"];
 
@@ -626,256 +487,13 @@ describe("V2BrantaClient", () => {
         text: async () => JSON.stringify(payment),
       } as MockResponse as Response);
 
-      await client.addPayment(payment, optionsWithHmac);
+      await client.postPayment(payment, optionsWithHmac);
       const secondCallHeaders = (mockFetch.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
       const secondCallSignature = secondCallHeaders["X-HMAC-Signature"];
 
       expect(firstCallSignature).toBe(secondCallSignature);
 
       Date.now = originalDateNow;
-    });
-  });
-
-  describe("getPaymentsByQRCode", () => {
-    let getPaymentsSpy: jest.SpiedFunction<typeof client.getPayments>;
-    let getZKPaymentSpy: jest.SpiedFunction<typeof client.getZKPayment>;
-
-    beforeEach(() => {
-      getPaymentsSpy = jest.spyOn(client, "getPayments").mockResolvedValue([]);
-      getZKPaymentSpy = jest.spyOn(client, "getZKPayment").mockResolvedValue([]);
-    });
-
-    test("should dispatch ZK query params to getZKPayment", async () => {
-      await client.getPaymentsByQRCode("http://example.com?branta_id=myid&branta_secret=mysecret");
-      expect(getZKPaymentSpy).toHaveBeenCalledWith("myid", "mysecret", null);
-    });
-
-    test("should preserve + in branta_id from bitcoin: URI query params", async () => {
-      const brantaId = "8RII4RAd8LDsbbBtZY4d+58TI7i7oWb1J43A6JOoZLBMKhUc6Fc5aEjzgUH5r4jouWoRR9ji9zUkswcFhnCrI9petshDfw==";
-      const brantaSecret = "ec71c3d2-8704-4879-aec6-d09e4d5073ab";
-      await client.getPaymentsByQRCode(
-        `bitcoin:BC1Q22WQZZ5PG2ZQVZECR6ZG6QSSUDA07XEXJU4WWQ?amount=0.00002679&pj=https://pay.branta.pro/BTC/pj&branta_id=${brantaId}&branta_secret=${brantaSecret}`
-      );
-      expect(getZKPaymentSpy).toHaveBeenCalledWith(brantaId, brantaSecret, null);
-    });
-
-    test("should dispatch /v2/verify/{id} URL to getPayments", async () => {
-      await client.getPaymentsByQRCode("http://localhost:3000/v2/verify/abc123");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", null);
-    });
-
-    test("should dispatch /v2/zk-verify/{id}#secret=s URL to getZKPayment", async () => {
-      await client.getPaymentsByQRCode("http://localhost:3000/v2/zk-verify/abc123#secret=mysecret");
-      expect(getZKPaymentSpy).toHaveBeenCalledWith("abc123", "mysecret", null);
-    });
-
-    test("should dispatch /v2/zk-verify/{id} without secret to getPayments", async () => {
-      await client.getPaymentsByQRCode("http://localhost:3000/v2/zk-verify/abc123");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", null);
-    });
-
-    test("should strip lightning: prefix and lowercase", async () => {
-      await client.getPaymentsByQRCode("lightning:LNBC1000N1TEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("lnbc1000n1test", null);
-    });
-
-    test("should strip bitcoin: and lowercase bc1q address", async () => {
-      await client.getPaymentsByQRCode("bitcoin:BC1QTEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtest", null);
-    });
-
-    test("should strip bitcoin: and preserve case for non-bc1q address", async () => {
-      await client.getPaymentsByQRCode("bitcoin:3AbcDef");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("3AbcDef", null);
-    });
-
-    test("should lowercase bare lnbc address", async () => {
-      await client.getPaymentsByQRCode("LNBC1000N1TEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("lnbc1000n1test", null);
-    });
-
-    test("should lowercase bare bc1q address", async () => {
-      await client.getPaymentsByQRCode("BC1QTEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtest", null);
-    });
-
-    test("should pass plain address through unchanged", async () => {
-      await client.getPaymentsByQRCode("some-payment-id");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null);
-    });
-
-    test("should trim surrounding whitespace", async () => {
-      await client.getPaymentsByQRCode("  some-payment-id  ");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null);
-    });
-
-    test("should decode percent-encoded branta_id from URL search params and pass to getZKPayment", async () => {
-      const plaintext = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-      const secret = "mySecret123";
-
-      const encrypted = await AesEncryption.encrypt(plaintext, secret);
-      const encodedId = encodeURIComponent(encrypted);
-
-      await client.getPaymentsByQRCode(
-        `http://example.com?branta_id=${encodedId}&branta_secret=${secret}`
-      );
-
-      expect(getZKPaymentSpy).toHaveBeenCalledWith(encrypted, secret, null);
-    });
-
-    test("should strip BIP21 query params and normalize bitcoin: URI", async () => {
-      await client.getPaymentsByQRCode(
-        "bitcoin:BC1QTESTADDRESS?amount=0.00002701&pj=https://example.com/pj"
-      );
-      expect(getPaymentsSpy).toHaveBeenCalledWith(
-        "bc1qtestaddress",
-        null
-      );
-    });
-
-    test("should decode percent-encoded ZK key from payments/k/ URL and pass to getPayments", async () => {
-      const plaintext = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
-      const secret = "mySecret123";
-
-      const encrypted = await AesEncryption.encrypt(plaintext, secret);
-
-      const encodedKey = encodeURIComponent(encrypted);
-      await client.getPaymentsByQRCode(
-        `http://localhost:3000/v2/payments/${encodedKey}`
-      );
-      expect(getPaymentsSpy).toHaveBeenCalledWith(encrypted, null);
-    });
-
-    describe("strict privacy mode", () => {
-      const zkOptions = { ...defaultOptions, privacy: 'strict' } as BrantaClientOptions;
-
-      test("should allow ZK query param QR (branta_id + branta_secret)", async () => {
-        await client.getPaymentsByQRCode(
-          "http://example.com?branta_id=myid&branta_secret=mysecret",
-          zkOptions
-        );
-        expect(getZKPaymentSpy).toHaveBeenCalledWith("myid", "mysecret", zkOptions);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
-      });
-
-      test("should allow zk-verify URL with secret", async () => {
-        await client.getPaymentsByQRCode(
-          "http://localhost:3000/v2/zk-verify/abc123#secret=mysecret",
-          zkOptions
-        );
-        expect(getZKPaymentSpy).toHaveBeenCalledWith("abc123", "mysecret", zkOptions);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
-      });
-
-      test("should block plain address and return []", async () => {
-        const result = await client.getPaymentsByQRCode("some-payment-id", zkOptions);
-        expect(result).toEqual([]);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
-      });
-
-      test("should block bitcoin: URI and return []", async () => {
-        const result = await client.getPaymentsByQRCode("bitcoin:BC1QTEST", zkOptions);
-        expect(result).toEqual([]);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
-      });
-
-      test("should block verify URL and return []", async () => {
-        const result = await client.getPaymentsByQRCode(
-          "http://localhost:3000/v2/verify/abc123",
-          zkOptions
-        );
-        expect(result).toEqual([]);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
-      });
-
-      test("should block zk-verify URL without secret and return []", async () => {
-        const result = await client.getPaymentsByQRCode(
-          "http://localhost:3000/v2/zk-verify/abc123",
-          zkOptions
-        );
-        expect(result).toEqual([]);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
-      });
-
-      test("should block lightning: address and return []", async () => {
-        const result = await client.getPaymentsByQRCode("lightning:LNBC1000N1TEST", zkOptions);
-        expect(result).toEqual([]);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
-      });
-    });
-  });
-
-  describe("getPayments with strict privacy", () => {
-    test("should throw BrantaPaymentException when privacy is 'strict' via options", async () => {
-      const zkOptions = { ...defaultOptions, privacy: 'strict' } as BrantaClientOptions;
-      await expect(client.getPayments("some-address", zkOptions)).rejects.toThrow(
-        BrantaPaymentException
-      );
-    });
-
-    test("should throw BrantaPaymentException when privacy is 'strict' via defaultOptions", async () => {
-      const zkClient = new V2BrantaClient({ ...defaultOptions, privacy: 'strict' });
-      await expect(zkClient.getPayments("some-address")).rejects.toThrow(BrantaPaymentException);
-    });
-
-    test("should not throw when privacy is 'loose'", async () => {
-      mockFetch.mockResolvedValue({
-        ok: false,
-      } as MockResponse as Response);
-      const result = await client.getPayments("some-address");
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe("addZKPayment with HMAC", () => {
-    test("should include HMAC headers when hmacSecret is provided", async () => {
-      const payment = {
-        destinations: [{ zk: true, value: "plain-value" }],
-      };
-
-      const optionsWithHmac = {
-        ...defaultOptions,
-        hmacSecret: "test-secret-key",
-      } as BrantaClientOptions;
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        text: async () => JSON.stringify(payment),
-      } as MockResponse as Response);
-
-      await client.addZKPayment(payment, optionsWithHmac);
-
-      expect(mockFetch).toHaveBeenCalledWith(
-        "http://localhost:3000/v2/payments",
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            "X-HMAC-Signature": expect.any(String),
-            "X-HMAC-Timestamp": expect.any(String),
-            Authorization: "Bearer test-api-key",
-          }),
-        }),
-      );
-    });
-
-    test("should work without HMAC headers", async () => {
-      const payment = {
-        destinations: [{ zk: true, value: "plain-value" }],
-      };
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        text: async () => JSON.stringify(payment),
-      } as MockResponse as Response);
-
-      const result = await client.addZKPayment(payment);
-
-      expect(result.payment).toBeDefined();
-      expect(result.secret).toBeDefined();
-
-      const callArgs = mockFetch.mock.calls[0][1] as RequestInit;
-      const headers = callArgs.headers as Record<string, string>;
-      expect(headers["X-HMAC-Signature"]).toBeUndefined();
-      expect(headers["X-HMAC-Timestamp"]).toBeUndefined();
     });
   });
 });

@@ -1,7 +1,10 @@
-import V2BrantaClient from "./v2/client.js";
-import { Payment, Destination, DestinationType } from "./v2/client.js";
 import BrantaClientOptions from "./classes/brantaClientOptions.js";
 import BrantaServerBaseUrl from "./classes/brantaServerBaseUrl.js";
+import { BrantaClient } from "./v2/client.js";
+import { BrantaService } from "./v2/service.js";
 
-export { V2BrantaClient, BrantaClientOptions, BrantaServerBaseUrl, Payment, Destination, DestinationType };
-export default V2BrantaClient;
+export type { IBrantaClient, IBrantaService, Payment, PaymentResult, ZKPaymentResult, Destination, DestinationType } from "./v2/types.js";
+export { BrantaClient, BrantaService, BrantaClientOptions, BrantaServerBaseUrl };
+// Deprecated: use BrantaClient
+export { BrantaClient as V2BrantaClient };
+export default BrantaClient;
