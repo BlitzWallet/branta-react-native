@@ -6,6 +6,8 @@ export interface Destination {
   value: string;
   type?: DestinationType;
   zk?: boolean;
+  zkId?: string;
+  isPrimary?: boolean;
 }
 
 export interface Payment {
@@ -17,6 +19,7 @@ export interface Payment {
   platform?: string;
   platformLogoUrl?: string;
   platformLogoLightUrl?: string;
+  createdAt?: string;
 }
 
 export interface PaymentResult {

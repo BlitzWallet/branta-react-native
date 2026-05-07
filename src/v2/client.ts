@@ -30,22 +30,38 @@ export class BrantaClient implements IBrantaClient {
       return [];
     }
 
-    const raw = await response.json() as (Payment & {
+    type RawDestination = {
+      value: string;
+      type?: string;
+      zk?: boolean;
+      zk_id?: string;
+      primary?: boolean;
+    };
+
+    type RawPayment = Omit<Payment, 'destinations' | 'platformLogoUrl' | 'platformLogoLightUrl' | 'verifyUrl' | 'createdAt'> & {
       platform_logo_url?: string;
       platform_logo_light_url?: string;
       verify_url?: string;
-    })[];
+      created_at?: string;
+      destinations?: RawDestination[];
+    };
+
+    const raw = await response.json() as RawPayment[];
 
     const data: Payment[] = raw.map(({
       platform_logo_url: platformLogoUrl,
       platform_logo_light_url: platformLogoLightUrl,
       verify_url: verifyUrl,
+      created_at: createdAt,
+      destinations: rawDests,
       ...rest
     }) => ({
       ...rest,
       platformLogoUrl,
       platformLogoLightUrl,
       verifyUrl,
+      createdAt,
+      destinations: (rawDests ?? []).map(({ zk_id: zkId, primary: isPrimary, type, ...d }) => ({ ...d, type: type as import('./types.js').DestinationType | undefined, zkId, isPrimary })),
     }));
 
     const baseUrl = this._resolveBaseUrl(options);
