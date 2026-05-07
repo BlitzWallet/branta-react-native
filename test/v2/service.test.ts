@@ -67,7 +67,7 @@ describe("BrantaService", () => {
     test("should throw BrantaPaymentException when privacy is 'strict' via options", async () => {
       const strictOptions = { ...defaultOptions, privacy: 'strict' } as BrantaClientOptions;
 
-      await expect(service.getPayments("some-address", strictOptions)).rejects.toThrow(
+      await expect(service.getPayments("some-address", null, strictOptions)).rejects.toThrow(
         BrantaPaymentException
       );
       expect(getPaymentsMock).not.toHaveBeenCalled();
@@ -94,14 +94,12 @@ describe("BrantaService", () => {
       const customOptions = { baseUrl: "https://production.example.com" } as BrantaClientOptions;
       getPaymentsMock.mockResolvedValue([]);
 
-      await service.getPayments("test-address", customOptions);
+      await service.getPayments("test-address", null, customOptions);
 
       expect(getPaymentsMock).toHaveBeenCalledWith("test-address", customOptions);
     });
-  });
 
-  describe("getZKPayment", () => {
-    test("should decrypt ZK destination values", async () => {
+    test("should decrypt ZK destination values when key is provided", async () => {
       const encryptedValue =
         "pQerSFV+fievHP+guYoGJjx1CzFFrYWHAgWrLhn5473Z19M6+WMScLd1hsk808AEF/x+GpZKmNacFBf5BbQ=";
       const payments = [
@@ -115,25 +113,25 @@ describe("BrantaService", () => {
 
       getPaymentsMock.mockResolvedValue(JSON.parse(JSON.stringify(payments)));
 
-      const result = await service.getZKPayment(encryptedValue, "1234");
+      const result = await service.getPayments(encryptedValue, "1234");
 
       expect(result[0].destinations[0].value).toBe("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa");
       expect(result[0].destinations[1].value).toBe("plain-value");
     });
 
-    test("should return unmodified payments with no ZK destinations", async () => {
+    test("should return unmodified payments with no ZK destinations when key is provided", async () => {
       const payments = [
         { destinations: [{ zk: false, value: "plain-value" }] },
       ];
 
       getPaymentsMock.mockResolvedValue(JSON.parse(JSON.stringify(payments)));
 
-      const result = await service.getZKPayment("plain-value", "test-secret");
+      const result = await service.getPayments("plain-value", "test-secret");
 
       expect(result[0].destinations[0].value).toBe("plain-value");
     });
 
-    test("should set ZK verifyUrl on returned payments", async () => {
+    test("should set ZK verifyUrl when encryption key is provided", async () => {
       const encryptedAddress = "pQerSFV+fievHP+guYoGJjx1CzFFrYWHAgWrLhn5473Z19M6+WMScLd1hsk808AEF/x+GpZKmNacFBf5BbQ=";
       const payments = [
         { destinations: [{ zk: true, value: encryptedAddress }] },
@@ -141,24 +139,24 @@ describe("BrantaService", () => {
 
       getPaymentsMock.mockResolvedValue(JSON.parse(JSON.stringify(payments)));
 
-      const result = await service.getZKPayment(encryptedAddress, "1234");
+      const result = await service.getPayments(encryptedAddress, "1234");
 
       expect(result[0].verifyUrl).toBe(
         `http://localhost:3000/v2/zk-verify/${encodeURIComponent(encryptedAddress)}#secret=1234`
       );
     });
 
-    test("should not enforce privacy mode (ZK lookups always permitted)", async () => {
+    test("should not enforce privacy mode when encryption key is provided", async () => {
       const strictOptions = { ...defaultOptions, privacy: 'strict' } as BrantaClientOptions;
       getPaymentsMock.mockResolvedValue([]);
 
-      await expect(service.getZKPayment("some-address", "secret", strictOptions)).resolves.toEqual([]);
+      await expect(service.getPayments("some-address", "secret", strictOptions)).resolves.toEqual([]);
       expect(getPaymentsMock).toHaveBeenCalled();
     });
   });
 
   describe("addPayment", () => {
-    test("should call client postPayment and return PaymentResult", async () => {
+    test("should call client postPayment and always return a secret", async () => {
       const payment = testPayments[0];
       postPaymentMock.mockResolvedValue({ ...payment });
 
@@ -167,18 +165,51 @@ describe("BrantaService", () => {
       expect(postPaymentMock).toHaveBeenCalledWith(payment, null);
       expect(result.payment).toBeDefined();
       expect(result.verifyLink).toBeDefined();
+      expect(result.secret).toBeDefined();
     });
 
-    test("should set verifyUrl on returned payment and return verifyLink", async () => {
-      const payment = testPayments[0];
+    test("should set plain verifyUrl and verifyLink when no ZK destinations", async () => {
+      const payment = testPayments[0]; // destinations: [{ value: "123", zk: false }]
       postPaymentMock.mockResolvedValue({ ...payment });
 
       const result = await service.addPayment(payment);
 
-      expect(result).toEqual({
-        payment: { ...payment, verifyUrl: 'http://localhost:3000/v2/verify/123' },
-        verifyLink: 'http://localhost:3000/v2/verify/123',
-      });
+      expect(result.payment.verifyUrl).toBe('http://localhost:3000/v2/verify/123');
+      expect(result.verifyLink).toBe('http://localhost:3000/v2/verify/123');
+    });
+
+    test("should encrypt ZK destinations and set ZK verifyUrl and verifyLink", async () => {
+      const plainText = "plain-value";
+      const payment = {
+        destinations: [
+          { zk: true, value: plainText },
+          { zk: false, value: "other-value" },
+        ],
+      };
+
+      postPaymentMock.mockImplementation((p) => Promise.resolve(JSON.parse(JSON.stringify(p))));
+
+      const result = await service.addPayment(payment);
+
+      const zkDest = result.payment.destinations.find((d: Destination) => d.zk === true)!;
+      expect(await AesEncryption.decrypt(zkDest.value, result.secret)).toBe(plainText);
+      expect(result.payment.destinations.find((d: Destination) => d.zk === false)!.value).toBe("other-value");
+      expect(result.payment.verifyUrl).toMatch(/^http:\/\/localhost:3000\/v2\/zk-verify\/.+#secret=.+$/);
+      expect(result.payment.verifyUrl).toContain(`#secret=${result.secret}`);
+      expect(result.verifyLink).toContain("zk-verify");
+      expect(result.verifyLink).toContain(`#secret=${result.secret}`);
+    });
+
+    test("should not encrypt destinations without zk:true", async () => {
+      const payment = {
+        destinations: [{ zk: false, value: "do-not-encrypt" }],
+      };
+
+      postPaymentMock.mockImplementation((p) => Promise.resolve(JSON.parse(JSON.stringify(p))));
+
+      const result = await service.addPayment(payment);
+
+      expect(result.payment.destinations[0].value).toBe("do-not-encrypt");
     });
 
     test("should propagate exception from client", async () => {
@@ -197,71 +228,8 @@ describe("BrantaService", () => {
 
       expect(postPaymentMock).toHaveBeenCalledWith(payment, customOptions);
     });
-  });
 
-  describe("addZKPayment", () => {
-    test("should encrypt ZK destinations and return payment with secret", async () => {
-      const plainText = "plain-value";
-      const payment = {
-        destinations: [
-          { zk: true, value: plainText },
-          { zk: false, value: "other-value" },
-        ],
-      };
-
-      postPaymentMock.mockImplementation((p) => Promise.resolve(JSON.parse(JSON.stringify(p))));
-
-      const result = await service.addZKPayment(payment);
-
-      const zkDest = result.payment.destinations.find((d: Destination) => d.zk === true)!;
-      expect(await AesEncryption.decrypt(zkDest.value, result.secret)).toBe(plainText);
-      expect(result.payment.destinations.find((d: Destination) => d.zk === false)!.value).toBe("other-value");
-      expect(result.secret).toBeDefined();
-    });
-
-    test("should set ZK verifyUrl on returned payment", async () => {
-      const payment = {
-        destinations: [{ zk: true, value: "plain-value" }],
-      };
-
-      postPaymentMock.mockImplementation((p) => Promise.resolve(JSON.parse(JSON.stringify(p))));
-
-      const result = await service.addZKPayment(payment);
-
-      expect(result.payment.verifyUrl).toMatch(
-        /^http:\/\/localhost:3000\/v2\/zk-verify\/.+#secret=.+$/
-      );
-      expect(result.payment.verifyUrl).toContain(`#secret=${result.secret}`);
-    });
-
-    test("should set ZK verifyLink with secret", async () => {
-      const payment = {
-        destinations: [{ zk: true, value: "plain-value" }],
-      };
-
-      postPaymentMock.mockImplementation((p) => Promise.resolve(JSON.parse(JSON.stringify(p))));
-
-      const result = await service.addZKPayment(payment);
-
-      expect(result.verifyLink).toContain("zk-verify");
-      expect(result.verifyLink).toContain(`#secret=${result.secret}`);
-    });
-
-    test("should not encrypt non-ZK destinations", async () => {
-      const payment = {
-        destinations: [
-          { zk: false, value: "do-not-encrypt" },
-        ],
-      };
-
-      postPaymentMock.mockImplementation((p) => Promise.resolve(JSON.parse(JSON.stringify(p))));
-
-      const result = await service.addZKPayment(payment);
-
-      expect(result.payment.destinations[0].value).toBe("do-not-encrypt");
-    });
-
-    test("should forward options to client when posting", async () => {
+    test("should forward options to client for ZK payment", async () => {
       const payment = {
         destinations: [{ zk: true, value: "plain-value" }],
       };
@@ -269,12 +237,9 @@ describe("BrantaService", () => {
 
       postPaymentMock.mockImplementation((p) => Promise.resolve(JSON.parse(JSON.stringify(p))));
 
-      await service.addZKPayment(payment, optionsWithHmac);
+      await service.addPayment(payment, optionsWithHmac);
 
-      expect(postPaymentMock).toHaveBeenCalledWith(
-        expect.any(Object),
-        optionsWithHmac
-      );
+      expect(postPaymentMock).toHaveBeenCalledWith(expect.any(Object), optionsWithHmac);
     });
   });
 
@@ -308,16 +273,14 @@ describe("BrantaService", () => {
 
   describe("getPaymentsByQRCode", () => {
     let getPaymentsSpy: jest.SpiedFunction<typeof service.getPayments>;
-    let getZKPaymentSpy: jest.SpiedFunction<typeof service.getZKPayment>;
 
     beforeEach(() => {
       getPaymentsSpy = jest.spyOn(service, "getPayments").mockResolvedValue([]);
-      getZKPaymentSpy = jest.spyOn(service, "getZKPayment").mockResolvedValue([]);
     });
 
-    test("should dispatch ZK query params to getZKPayment", async () => {
+    test("should dispatch ZK query params to getPayments with key", async () => {
       await service.getPaymentsByQRCode("http://example.com?branta_id=myid&branta_secret=mysecret");
-      expect(getZKPaymentSpy).toHaveBeenCalledWith("myid", "mysecret", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("myid", "mysecret", null);
     });
 
     test("should preserve + in branta_id from bitcoin: URI query params", async () => {
@@ -326,60 +289,60 @@ describe("BrantaService", () => {
       await service.getPaymentsByQRCode(
         `bitcoin:BC1Q22WQZZ5PG2ZQVZECR6ZG6QSSUDA07XEXJU4WWQ?amount=0.00002679&pj=https://pay.branta.pro/BTC/pj&branta_id=${brantaId}&branta_secret=${brantaSecret}`
       );
-      expect(getZKPaymentSpy).toHaveBeenCalledWith(brantaId, brantaSecret, null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith(brantaId, brantaSecret, null);
     });
 
     test("should dispatch /v2/verify/{id} URL to getPayments", async () => {
       await service.getPaymentsByQRCode("http://localhost:3000/v2/verify/abc123");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", null, null);
     });
 
-    test("should dispatch /v2/zk-verify/{id}#secret=s URL to getZKPayment", async () => {
+    test("should dispatch /v2/zk-verify/{id}#secret=s URL to getPayments with key", async () => {
       await service.getPaymentsByQRCode("http://localhost:3000/v2/zk-verify/abc123#secret=mysecret");
-      expect(getZKPaymentSpy).toHaveBeenCalledWith("abc123", "mysecret", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", "mysecret", null);
     });
 
     test("should dispatch /v2/zk-verify/{id} without secret to getPayments", async () => {
       await service.getPaymentsByQRCode("http://localhost:3000/v2/zk-verify/abc123");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", null, null);
     });
 
     test("should strip lightning: prefix and lowercase", async () => {
       await service.getPaymentsByQRCode("lightning:LNBC1000N1TEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("lnbc1000n1test", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("lnbc1000n1test", null, null);
     });
 
     test("should strip bitcoin: and lowercase bc1q address", async () => {
       await service.getPaymentsByQRCode("bitcoin:BC1QTEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtest", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtest", null, null);
     });
 
     test("should strip bitcoin: and preserve case for non-bc1q address", async () => {
       await service.getPaymentsByQRCode("bitcoin:3AbcDef");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("3AbcDef", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("3AbcDef", null, null);
     });
 
     test("should lowercase bare lnbc address", async () => {
       await service.getPaymentsByQRCode("LNBC1000N1TEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("lnbc1000n1test", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("lnbc1000n1test", null, null);
     });
 
     test("should lowercase bare bc1q address", async () => {
       await service.getPaymentsByQRCode("BC1QTEST");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtest", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtest", null, null);
     });
 
     test("should pass plain address through unchanged", async () => {
       await service.getPaymentsByQRCode("some-payment-id");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null, null);
     });
 
     test("should trim surrounding whitespace", async () => {
       await service.getPaymentsByQRCode("  some-payment-id  ");
-      expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("some-payment-id", null, null);
     });
 
-    test("should decode percent-encoded branta_id from URL search params and pass to getZKPayment", async () => {
+    test("should decode percent-encoded branta_id from URL search params and pass to getPayments with key", async () => {
       const plaintext = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
       const secret = "mySecret123";
 
@@ -390,14 +353,14 @@ describe("BrantaService", () => {
         `http://example.com?branta_id=${encodedId}&branta_secret=${secret}`
       );
 
-      expect(getZKPaymentSpy).toHaveBeenCalledWith(encrypted, secret, null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith(encrypted, secret, null);
     });
 
     test("should strip BIP21 query params and normalize bitcoin: URI", async () => {
       await service.getPaymentsByQRCode(
         "bitcoin:BC1QTESTADDRESS?amount=0.00002701&pj=https://example.com/pj"
       );
-      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtestaddress", null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith("bc1qtestaddress", null, null);
     });
 
     test("should decode percent-encoded ZK key from payments/k/ URL and pass to getPayments", async () => {
@@ -410,7 +373,7 @@ describe("BrantaService", () => {
       await service.getPaymentsByQRCode(
         `http://localhost:3000/v2/payments/${encodedKey}`
       );
-      expect(getPaymentsSpy).toHaveBeenCalledWith(encrypted, null);
+      expect(getPaymentsSpy).toHaveBeenCalledWith(encrypted, null, null);
     });
 
     describe("strict privacy mode", () => {
@@ -421,8 +384,7 @@ describe("BrantaService", () => {
           "http://example.com?branta_id=myid&branta_secret=mysecret",
           strictOptions
         );
-        expect(getZKPaymentSpy).toHaveBeenCalledWith("myid", "mysecret", strictOptions);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
+        expect(getPaymentsSpy).toHaveBeenCalledWith("myid", "mysecret", strictOptions);
       });
 
       test("should allow zk-verify URL with secret", async () => {
@@ -430,8 +392,7 @@ describe("BrantaService", () => {
           "http://localhost:3000/v2/zk-verify/abc123#secret=mysecret",
           strictOptions
         );
-        expect(getZKPaymentSpy).toHaveBeenCalledWith("abc123", "mysecret", strictOptions);
-        expect(getPaymentsSpy).not.toHaveBeenCalled();
+        expect(getPaymentsSpy).toHaveBeenCalledWith("abc123", "mysecret", strictOptions);
       });
 
       test("should block plain address and return []", async () => {

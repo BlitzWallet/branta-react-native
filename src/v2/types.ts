@@ -35,10 +35,8 @@ export interface IBrantaClient {
 }
 
 export interface IBrantaService {
-  getPayments(address: string, options?: BrantaClientOptions | null): Promise<Payment[]>;
-  getZKPayment(address: string, secret: string, options?: BrantaClientOptions | null): Promise<Payment[]>;
-  addPayment(payment: Payment, options?: BrantaClientOptions | null): Promise<PaymentResult>;
-  addZKPayment(payment: Payment, options?: BrantaClientOptions | null): Promise<ZKPaymentResult>;
+  getPayments(address: string, destinationEncryptionKey?: string | null, options?: BrantaClientOptions | null): Promise<Payment[]>;
+  addPayment(payment: Payment, options?: BrantaClientOptions | null): Promise<ZKPaymentResult>;
   getPaymentsByQRCode(qrText: string, options?: BrantaClientOptions | null): Promise<Payment[]>;
   isApiKeyValid(options?: BrantaClientOptions | null): Promise<boolean>;
 }

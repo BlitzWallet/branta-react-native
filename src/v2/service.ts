@@ -1,7 +1,7 @@
 import AesEncryption from "../helpers/aes.js";
 import BrantaPaymentException from "../classes/brantaPaymentException.js";
 import BrantaClientOptions from "../classes/brantaClientOptions.js";
-import { IBrantaClient, IBrantaService, Payment, PaymentResult, ZKPaymentResult } from "./types.js";
+import { IBrantaClient, IBrantaService, Payment, ZKPaymentResult } from "./types.js";
 import { BrantaClient } from "./client.js";
 
 export class BrantaService implements IBrantaService {
@@ -13,64 +13,57 @@ export class BrantaService implements IBrantaService {
     this._client = client ?? new BrantaClient(defaultOptions);
   }
 
-  async getPayments(address: string, options: BrantaClientOptions | null = null): Promise<Payment[]> {
-    const privacy = options?.privacy ?? this._defaultOptions?.privacy;
-    if (privacy === 'strict') {
-      throw new BrantaPaymentException("privacy is set to 'strict': plain on-chain address lookups are not permitted");
-    }
-
-    const payments = await this._client.getPayments(address, options);
-    const baseUrl = this._resolveBaseUrl(options);
-    for (const payment of payments) {
-      payment.verifyUrl = this._buildVerifyUrl(baseUrl, address);
-    }
-    return payments;
-  }
-
-  async getZKPayment(address: string, secret: string, options: BrantaClientOptions | null = null): Promise<Payment[]> {
-    // Calls client directly (not this.getPayments) — ZK lookups bypass privacy mode enforcement
-    const payments = await this._client.getPayments(address, options);
-
-    for (const payment of payments) {
-      for (const destination of payment?.destinations || []) {
-        if (destination.zk === false) continue;
-        destination.value = await AesEncryption.decrypt(destination.value, secret);
+  async getPayments(address: string, destinationEncryptionKey: string | null = null, options: BrantaClientOptions | null = null): Promise<Payment[]> {
+    if (!destinationEncryptionKey) {
+      const privacy = options?.privacy ?? this._defaultOptions?.privacy;
+      if (privacy === 'strict') {
+        throw new BrantaPaymentException("privacy is set to 'strict': plain on-chain address lookups are not permitted");
       }
     }
 
+    const payments = await this._client.getPayments(address, options);
     const baseUrl = this._resolveBaseUrl(options);
-    for (const payment of payments) {
-      payment.verifyUrl = this._buildVerifyUrl(baseUrl, address, secret);
+
+    if (destinationEncryptionKey) {
+      for (const payment of payments) {
+        for (const destination of payment?.destinations || []) {
+          if (destination.zk === false) continue;
+          destination.value = await AesEncryption.decrypt(destination.value, destinationEncryptionKey);
+        }
+        payment.verifyUrl = this._buildVerifyUrl(baseUrl, address, destinationEncryptionKey);
+      }
+    } else {
+      for (const payment of payments) {
+        payment.verifyUrl = this._buildVerifyUrl(baseUrl, address);
+      }
     }
 
     return payments;
   }
 
-  async addPayment(payment: Payment, options: BrantaClientOptions | null = null): Promise<PaymentResult> {
-    const baseUrl = this._resolveBaseUrl(options);
-    const paymentResponse = await this._client.postPayment(payment, options);
-
-    paymentResponse.verifyUrl = this._buildVerifyUrl(baseUrl, payment.destinations[0].value);
-    const verifyLink = baseUrl + "/v2/verify/" + encodeURIComponent(payment.destinations[0].value);
-
-    return { payment: paymentResponse, verifyLink };
-  }
-
-  async addZKPayment(payment: Payment, options: BrantaClientOptions | null = null): Promise<ZKPaymentResult> {
+  async addPayment(payment: Payment, options: BrantaClientOptions | null = null): Promise<ZKPaymentResult> {
     const secret = crypto.randomUUID();
+    let hasZk = false;
 
     for (const destination of payment?.destinations || []) {
-      if (destination.zk === false) continue;
+      if (destination.zk !== true) continue;
+      hasZk = true;
       destination.value = await AesEncryption.encrypt(destination.value, secret);
     }
 
-    const responsePayment = (await this.addPayment(payment, options)) as ZKPaymentResult;
+    const baseUrl = this._resolveBaseUrl(options);
+    const paymentResponse = await this._client.postPayment(payment, options);
+    const firstValue = payment.destinations[0].value;
 
-    responsePayment.secret = secret;
-    responsePayment.verifyLink = responsePayment.verifyLink.replace('verify', 'zk-verify') + "#secret=" + secret;
-    responsePayment.payment.verifyUrl = this._buildVerifyUrl(this._resolveBaseUrl(options), payment.destinations[0].value, secret);
+    if (hasZk) {
+      paymentResponse.verifyUrl = this._buildVerifyUrl(baseUrl, firstValue, secret);
+      const verifyLink = `${baseUrl}/v2/zk-verify/${encodeURIComponent(firstValue)}#secret=${secret}`;
+      return { payment: paymentResponse, verifyLink, secret };
+    }
 
-    return responsePayment;
+    paymentResponse.verifyUrl = this._buildVerifyUrl(baseUrl, firstValue);
+    const verifyLink = `${baseUrl}/v2/verify/${encodeURIComponent(firstValue)}`;
+    return { payment: paymentResponse, verifyLink, secret };
   }
 
   async getPaymentsByQRCode(qrText: string, options: BrantaClientOptions | null = null): Promise<Payment[]> {
@@ -84,7 +77,7 @@ export class BrantaService implements IBrantaService {
     const rawParams = new URLSearchParams(url.search.replace(/\+/g, '%2B'));
     const brantaId = rawParams.get('branta_id');
     const brantaSecret = rawParams.get('branta_secret');
-    if (brantaId && brantaSecret) return this.getZKPayment(brantaId, brantaSecret, options);
+    if (brantaId && brantaSecret) return this.getPayments(brantaId, brantaSecret, options);
 
     if (url.protocol === 'bitcoin:') {
       return this._getPlainPayments(this._normalizeAddress(url.pathname), options);
@@ -103,7 +96,7 @@ export class BrantaService implements IBrantaService {
         if (type === 'verify') return this._getPlainPayments(id, options);
         if (type === 'zk-verify') {
           const secret = new URLSearchParams(url.hash.slice(1)).get('secret');
-          if (secret) return this.getZKPayment(id, secret, options);
+          if (secret) return this.getPayments(id, secret, options);
           return this._getPlainPayments(id, options);
         }
       }
@@ -122,7 +115,7 @@ export class BrantaService implements IBrantaService {
   private _getPlainPayments(address: string, options: BrantaClientOptions | null): Promise<Payment[]> {
     const privacy = options?.privacy ?? this._defaultOptions?.privacy;
     if (privacy === 'strict') return Promise.resolve([]);
-    return this.getPayments(address, options);
+    return this.getPayments(address, null, options);
   }
 
   private _buildVerifyUrl(baseUrl: string, address: string, secret?: string): string {
