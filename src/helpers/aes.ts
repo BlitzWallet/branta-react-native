@@ -5,12 +5,19 @@ class AesEncryption {
    * @param secret - The secret key (will be hashed with SHA-256)
    * @returns Base64-encoded encrypted data (iv + ciphertext + tag)
    */
-  static async encrypt(value: string, secret: string): Promise<string> {
+  static async encrypt(value: string, secret: string, deterministicNonce = false): Promise<string> {
     try {
       const encoder = new TextEncoder();
       const secretData = encoder.encode(secret);
       const keyData = await crypto.subtle.digest('SHA-256', secretData);
-      const iv = crypto.getRandomValues(new Uint8Array(12));
+      let iv: Uint8Array;
+      if (deterministicNonce) {
+        const hmacKey = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        const hmacBuffer = await crypto.subtle.sign('HMAC', hmacKey, encoder.encode(value));
+        iv = new Uint8Array(hmacBuffer).slice(0, 12);
+      } else {
+        iv = crypto.getRandomValues(new Uint8Array(12));
+      }
 
       const key = await crypto.subtle.importKey(
         'raw',

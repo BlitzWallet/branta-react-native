@@ -32,4 +32,24 @@ describe("AesEncryption", () => {
 
     expect(decrypted).toBe("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa");
   });
+
+  test("deterministic nonce produces the same ciphertext on repeated calls", async () => {
+    const value = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+    const secret = "12345";
+
+    const first = await AesEncryption.encrypt(value, secret, true);
+    const second = await AesEncryption.encrypt(value, secret, true);
+
+    expect(first).toBe(second);
+  });
+
+  test("random nonce produces different ciphertext on repeated calls", async () => {
+    const value = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
+    const secret = "12345";
+
+    const first = await AesEncryption.encrypt(value, secret);
+    const second = await AesEncryption.encrypt(value, secret);
+
+    expect(first).not.toBe(second);
+  });
 });
