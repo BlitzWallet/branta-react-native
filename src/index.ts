@@ -5,6 +5,6 @@ import { BrantaService } from "./v2/service.js";
 
 export type { IBrantaClient, IBrantaService, Payment, PaymentResult, ZKPaymentResult, Destination, DestinationType } from "./v2/types.js";
 export { BrantaClient, BrantaService, BrantaClientOptions, BrantaServerBaseUrl };
-// Deprecated: use BrantaClient
-export { BrantaClient as V2BrantaClient };
-export default BrantaClient;
+// Deprecated: use BrantaService
+export { BrantaService as V2BrantaClient };
+export default BrantaService;

@@ -1,6 +1,9 @@
 import BrantaPaymentException from "../classes/brantaPaymentException.js";
 import BrantaClientOptions from "../classes/brantaClientOptions.js";
 import { IBrantaClient, Payment } from "./types.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes, bytesToHex } from "@noble/hashes/utils.js";
 
 interface HttpClient {
   baseURL: string;
@@ -22,9 +25,14 @@ export class BrantaClient implements IBrantaClient {
     this._defaultOptions = brantaClientOptions;
   }
 
-  async getPayments(address: string, options: BrantaClientOptions | null = null): Promise<Payment[]> {
+  async getPayments(
+    address: string,
+    options: BrantaClientOptions | null = null,
+  ): Promise<Payment[]> {
     const httpClient = this._createClient(options);
-    const response = await httpClient.get(`/v2/payments/${encodeURIComponent(address)}`);
+    const response = await httpClient.get(
+      `/v2/payments/${encodeURIComponent(address)}`,
+    );
 
     if (!response.ok || response.headers.get("content-length") === "0") {
       return [];
@@ -38,7 +46,14 @@ export class BrantaClient implements IBrantaClient {
       primary?: boolean;
     };
 
-    type RawPayment = Omit<Payment, 'destinations' | 'platformLogoUrl' | 'platformLogoLightUrl' | 'verifyUrl' | 'createdAt'> & {
+    type RawPayment = Omit<
+      Payment,
+      | "destinations"
+      | "platformLogoUrl"
+      | "platformLogoLightUrl"
+      | "verifyUrl"
+      | "createdAt"
+    > & {
       platform_logo_url?: string;
       platform_logo_light_url?: string;
       verify_url?: string;
@@ -46,23 +61,32 @@ export class BrantaClient implements IBrantaClient {
       destinations?: RawDestination[];
     };
 
-    const raw = await response.json() as RawPayment[];
+    const raw = (await response.json()) as RawPayment[];
 
-    const data: Payment[] = raw.map(({
-      platform_logo_url: platformLogoUrl,
-      platform_logo_light_url: platformLogoLightUrl,
-      verify_url: verifyUrl,
-      created_at: createdAt,
-      destinations: rawDests,
-      ...rest
-    }) => ({
-      ...rest,
-      platformLogoUrl,
-      platformLogoLightUrl,
-      verifyUrl,
-      createdAt,
-      destinations: (rawDests ?? []).map(({ zk_id: zkId, primary: isPrimary, type, ...d }) => ({ ...d, type: type as import('./types.js').DestinationType | undefined, zkId, isPrimary })),
-    }));
+    const data: Payment[] = raw.map(
+      ({
+        platform_logo_url: platformLogoUrl,
+        platform_logo_light_url: platformLogoLightUrl,
+        verify_url: verifyUrl,
+        created_at: createdAt,
+        destinations: rawDests,
+        ...rest
+      }) => ({
+        ...rest,
+        platformLogoUrl,
+        platformLogoLightUrl,
+        verifyUrl,
+        createdAt,
+        destinations: (rawDests ?? []).map(
+          ({ zk_id: zkId, primary: isPrimary, type, ...d }) => ({
+            ...d,
+            type: type as import("./types.js").DestinationType | undefined,
+            zkId,
+            isPrimary,
+          }),
+        ),
+      }),
+    );
 
     const baseUrl = this._resolveBaseUrl(options);
     const baseOrigin = new URL(baseUrl).origin;
@@ -70,19 +94,36 @@ export class BrantaClient implements IBrantaClient {
     for (const payment of data) {
       if (payment.platformLogoUrl) {
         let valid = false;
-        try { valid = new URL(payment.platformLogoUrl).origin === baseOrigin; } catch { /* invalid URL */ }
-        if (!valid) throw new BrantaPaymentException("platformLogoUrl domain does not match the configured baseUrl domain");
+        try {
+          valid = new URL(payment.platformLogoUrl).origin === baseOrigin;
+        } catch {
+          /* invalid URL */
+        }
+        if (!valid)
+          throw new BrantaPaymentException(
+            "platformLogoUrl domain does not match the configured baseUrl domain",
+          );
       }
       if (payment.platformLogoLightUrl) {
         let valid = false;
-        try { valid = new URL(payment.platformLogoLightUrl).origin === baseOrigin; } catch { /* invalid URL */ }
-        if (!valid) throw new BrantaPaymentException("platformLogoLightUrl domain does not match the configured baseUrl domain");
+        try {
+          valid = new URL(payment.platformLogoLightUrl).origin === baseOrigin;
+        } catch {
+          /* invalid URL */
+        }
+        if (!valid)
+          throw new BrantaPaymentException(
+            "platformLogoLightUrl domain does not match the configured baseUrl domain",
+          );
       }
     }
     return data;
   }
 
-  async postPayment(payment: Payment, options: BrantaClientOptions | null = null): Promise<Payment> {
+  async postPayment(
+    payment: Payment,
+    options: BrantaClientOptions | null = null,
+  ): Promise<Payment> {
     const httpClient = this._createClient(options);
     this._setApiKey(httpClient, options);
     await this._setHmacHeaders(
@@ -103,7 +144,9 @@ export class BrantaClient implements IBrantaClient {
     return JSON.parse(responseBody) as Payment;
   }
 
-  async isApiKeyValid(options: BrantaClientOptions | null = null): Promise<boolean> {
+  async isApiKeyValid(
+    options: BrantaClientOptions | null = null,
+  ): Promise<boolean> {
     const httpClient = this._createClient(options);
     this._setApiKey(httpClient, options);
 
@@ -114,14 +157,14 @@ export class BrantaClient implements IBrantaClient {
 
   private _resolveBaseUrl(options: BrantaClientOptions | null): string {
     const baseUrl = options?.baseUrl ?? this._defaultOptions?.baseUrl;
-    return typeof baseUrl === 'string' ? baseUrl : baseUrl?.url ?? '';
+    return typeof baseUrl === "string" ? baseUrl : (baseUrl?.url ?? "");
   }
 
   private _createClient(options: BrantaClientOptions | null): HttpClient {
     const baseUrl = options?.baseUrl ?? this._defaultOptions?.baseUrl;
     const timeout = options?.timeout ?? this._defaultOptions?.timeout ?? 10000;
 
-    const fullBaseUrl = typeof baseUrl === 'string' ? baseUrl : baseUrl?.url;
+    const fullBaseUrl = typeof baseUrl === "string" ? baseUrl : baseUrl?.url;
 
     if (!fullBaseUrl) {
       throw new Error("Branta: BaseUrl is a required option.");
@@ -143,15 +186,19 @@ export class BrantaClient implements IBrantaClient {
           });
           return response;
         } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            throw new BrantaPaymentException('Request timeout');
+          if (error instanceof Error && error.name === "AbortError") {
+            throw new BrantaPaymentException("Request timeout");
           }
           throw error;
         } finally {
           clearTimeout(timeoutId);
         }
       },
-      async post(url: string, data: unknown, config: RequestConfig = {}): Promise<Response> {
+      async post(
+        url: string,
+        data: unknown,
+        config: RequestConfig = {},
+      ): Promise<Response> {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
@@ -168,8 +215,8 @@ export class BrantaClient implements IBrantaClient {
           });
           return response;
         } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            throw new BrantaPaymentException('Request timeout');
+          if (error instanceof Error && error.name === "AbortError") {
+            throw new BrantaPaymentException("Request timeout");
           }
           throw error;
         } finally {
@@ -179,7 +226,10 @@ export class BrantaClient implements IBrantaClient {
     };
   }
 
-  private _setApiKey(httpClient: HttpClient, options: BrantaClientOptions | null): void {
+  private _setApiKey(
+    httpClient: HttpClient,
+    options: BrantaClientOptions | null,
+  ): void {
     const apiKey =
       options?.defaultApiKey ?? this._defaultOptions?.defaultApiKey;
 
@@ -198,7 +248,7 @@ export class BrantaClient implements IBrantaClient {
     method: string,
     url: string,
     body: unknown,
-    options: BrantaClientOptions | null
+    options: BrantaClientOptions | null,
   ): Promise<void> {
     const hmacSecret = options?.hmacSecret ?? this._defaultOptions?.hmacSecret;
 
@@ -210,29 +260,9 @@ export class BrantaClient implements IBrantaClient {
     const bodyString = JSON.stringify(body);
     const message = `${method}|${httpClient.baseURL}${url}|${bodyString}|${timestamp}`;
 
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(hmacSecret);
-    const messageData = encoder.encode(message);
-
-    const cryptoKey = await crypto.subtle.importKey(
-      "raw",
-      keyData,
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
+    const signature = bytesToHex(
+      hmac(sha256, utf8ToBytes(hmacSecret), utf8ToBytes(message)),
     );
-
-    const signatureBuffer = await crypto.subtle.sign(
-      "HMAC",
-      cryptoKey,
-      messageData,
-    );
-
-    const signatureArray = Array.from(new Uint8Array(signatureBuffer));
-    const signature = signatureArray
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-      .toLowerCase();
 
     httpClient.headers = {
       ...httpClient.headers,
